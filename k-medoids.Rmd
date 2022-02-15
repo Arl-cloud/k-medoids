@@ -1,0 +1,192 @@
+---
+title: "Assignment7"
+author: "Arleen Lindenmeyer"
+date: "10/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+#install.packages("useful")
+library(useful)
+library(ggplot2)
+```
+
+
+##Step 1
+
+Run the following code to load some clustering data with 2 features into your session.
+```{r}
+library(tidyverse)
+clus_df <- read_csv("https://raw.githubusercontent.com/vankesteren/dav_practicals/master/12_Unsupervised_learning_Clustering/data/clusterdata.csv")
+```
+
+##Step 2
+
+Write a function l2_dist(x, y) that takes in two vectors and outputs the euclidean distance between the two vectors.
+```{r}
+l2_dist <- function(x, y) sqrt(sum((x - y)^2))
+```
+
+Testing the function:
+```{r}
+x <- c(2, 6, 7, 7, 5, 13, 14, 17, 11, 8)
+y <- c(3, 5, 5, 3, 7, 12, 13, 19, 22, 7)
+l2_dist(x, y)
+```
+
+##Step 3
+Program a K-Medioids clustering algorithm called kmedioids. The inputs of this function should be X, a data frame, and K, an integer stating how many clusters you want. The output is at least the cluster assignments (an integer vector). Use your l2_dist function to compute the euclidian distance. Create helpful comments in the code along the way. Apply the kmedioids function on clus_df and visualise your result.
+
+```{r}
+#Classifies each point into the cluster whose center it is closest to
+cluster_labels <- function (X, centers) {
+  df <- data.frame(matrix(ncol = 3, nrow = 0))
+  #Calculate distance of points to all center points
+  for (c in 1:nrow(X)){
+    for (i in 1:nrow(centers)){
+        distance = l2_dist(centers[i,-1], X[c,-1])
+        df <- rbind(df,(c(centers$X_index[i], X$X_index[c], distance)))
+    }
+  }
+
+  names <- c("centers_index", "X_index", "distance")
+  colnames(df) <- names
+  
+  #only keep smallest distance of data point to center point > assign data point to center point with smallest distance
+  for (m in unique(df$X_index)){
+    df_temp <- df[df$X_index == m,]
+    df_temp <- df_temp[which.min(df_temp$distance),]
+    df <- df[df$X_index != m,]
+    df <- rbind(df,df_temp)
+  }
+  X <- merge(X, df, by.x = "X_index", by.y = "X_index")
+  return(X)
+}
+```
+
+```{r}
+#for each point, within one cluster, calculate its distance from all other points within this cluster
+calculate_sumdist <- function (X) {
+  df2 <- data.frame(matrix(ncol = 3, nrow = 0))
+  for (n in 1:nrow(X)){
+    sum_dist <- 0
+    for (j in 1:nrow(X)){
+      distance2 = l2_dist(X[n,2:3], X[j,2:3])
+      sum_dist = sum_dist + distance2
+    }
+    df2 <- rbind(df2, c(X$centers_index[n], X$X_index[n], sum_dist))
+  }
+  names2 <- c("center_index","X_index", "sum_distance")
+  colnames(df2) <- names2
+  return(df2)
+}
+```
+
+```{r}
+#big / final function, that uses all other functions above
+#takes dataframe X, number of clusters K and maximum number of iterations maxit as input
+kmedoids <- function (X, K, maxit) {
+  #adding an index column to uniquely identify the data points/ to be used in the functions
+  X_with_index <- cbind(X_index = 1:nrow(X), X)
+  #Choose k (random) data points as starting points for cluster centers
+  centers = X_with_index %>% slice_sample(n = K)
+  
+  #create before center information to compare current center information to
+  before_center_index <- rep(0,K) #for first comparison, to satisfy while    condition
+  before_center_coords <- NA
+  
+  #current center information
+  current_center_index <- centers$X_index
+  current_center_coords <- X_with_index[X_with_index$X_index %in% current_center_index,]
+  
+  #keep track of cluster centers
+  center_history <- centers$X_index
+  
+  #counts nr. of iterations, used for maxit
+  counter = 0
+
+  #while condition checks if the cluster centers changed (true the vector urrent_center_index is different from before_center_index) and stops the loop after maxit is reached or the cluster centers stayed the same
+  while (all(current_center_index != before_center_index) & counter <= maxit) {
+    #assignent of cluster labels to the data points
+    df_new <- cluster_labels(X_with_index, current_center_coords)
+    df_new3  <- data.frame(matrix(ncol = 3, nrow = 0))
+  
+
+    for(h in 1:nrow(current_center_coords)){
+      center_index = current_center_coords[h,]$X_index
+      df_new2 <- df_new %>% filter(centers_index == center_index)
+      #calculating sum of distance from one point to all other points            within one cluster
+      df_new3 <- rbind(df_new3,calculate_sumdist(df_new2))
+      
+    }
+    
+    
+    names2 <- c("centers_index", "X_index", "distance")
+    colnames(df_new3) <- names2
+
+    #whichever point within one cluster has the smallest sum of distance to     the other points in the cluster is chosen to be the next centroid of       this cluster
+    for (m in unique(df_new3$centers_index)){
+      df_temp <- df_new3[df_new3$centers_index == m,]
+      df_temp <- df_temp[which.min(df_temp$distance),]
+      df_new3 <- df_new3[df_new3$centers_index != m,]
+      df_new3 <- rbind(df_new3,df_temp)
+    }
+    
+    before_center_index <- current_center_index
+    before_center_coords <- current_center_coords
+
+    current_center_coords <- merge(df_new3, X_with_index, by.x = "X_index", by.y = "X_index")
+    current_center_coords <- current_center_coords[,c("X_index", "x1", "x2")]
+    current_center_index <- current_center_coords$X_index
+    
+    center_history <- rbind(center_history,current_center_index)
+
+    #counts nr. of iterations, used for maxit
+    counter = counter + 1
+  }
+  
+  # create cluster center history
+  center_history <- data.frame(center_history)
+  center_history$iteration <- 1:nrow(center_history)
+  rownames(center_history) <- NULL
+
+  #dataframe with index information, coordinates, label (centers_index) and   if a point is a cluster center
+  X_with_index$cluster_center <- "no"
+  X_with_index$cluster_center[X_with_index$X_index %in% current_center_coords$X_index] <- "yes"
+  X_final <- merge(X_with_index, df_new[,c("X_index","centers_index")], by.x = "X_index", by.y = "X_index")
+  X_final$centers_index <- factor(X_final$centers_index)
+  
+  # create list of outputs (history + data points with assigned clusters/mediods)
+  res <- list(clustered_data = X_final, history = center_history)
+  
+  return(res)
+}
+```
+
+```{r}
+#Apply the kmedioids function on clus_df
+res <- kmedoids(clus_df, 3, 10)
+res
+```
+
+
+```{r}
+# filter out centers for later highlighting in the plot
+highlight_centers <- res$clustered_data %>% filter(cluster_center=="yes")
+
+# plot: centers are marked with a cross, the assigment of the points to a cluster is mapped to color
+#mapping of the data assigned to clusters
+ggplot(res$clustered_data, aes(x=x1, y=x2, color=centers_index)) + 
+  geom_point(size=1, alpha = 0.5) +
+  #mapping of the centers
+  geom_point(data=highlight_centers, 
+             aes(x=x1,y=x2), 
+             shape='cross',
+             size=3) +
+  theme_minimal()
+```
